@@ -28,7 +28,7 @@ class ArticleCrawler(object):
         self.target_url_list = []
         self.num_of_pool = num_of_pool
 
-    def set_category(self, *args):
+    def set_category(self, args):
         for key in args:
             if self.categories.get(key) is None:
                 raise InvalidCategory(key)
@@ -184,8 +184,7 @@ class ArticleCrawler(object):
                 return True
         return False
 
-
-    def crawling(self, category_name, target_url_list, key_year, key_month):
+    def crawling(self, category_name, target_url_list, year, month):
         global news_detail
 
         # Multi Process PID
@@ -193,14 +192,14 @@ class ArticleCrawler(object):
 
         # start_year년 start_month월 ~ end_year의 end_month 날짜까지 기사를 수집합니다.
         writer = Writer(category_name=category_name,
-                        date={'start_year': int(key_year), 'start_month': int(key_month),
-                              'end_year': int(key_year), 'end_month': int(key_month)})
+                        date={'start_year': year, 'start_month': month,
+                              'end_year': year, 'end_month': month})
 
         news_detail[:] = []
         news_detail.append(['Date', 'Category', 'NewsComp', 'Title', 'Content', 'URL'])
         self.target_url_list = target_url_list
 
-        print('    Start crawling news[{:05d}] of {}/{}'.format(len(self.target_url_list), key_year, key_month))
+        print('    Start crawling news[{:05d}] of {}/{}'.format(len(self.target_url_list), year, month))
         pool = Pool(processes=self.num_of_pool)
         pool.map(self.crawling_core, zip(range(0, len(self.target_url_list), 1), [category_name]*len(self.target_url_list)))
 
@@ -217,22 +216,43 @@ class ArticleCrawler(object):
             # 기사 URL 형식
             url = "http://news.naver.com/main/list.nhn?mode=LSD&mid=sec&sid1=" + str(self.categories.get(category_name)) + "&date="
 
-            day_urls = self.make_news_page_url(url, self.date['start_year'], self.date['end_year'],
-                                                    self.date['start_month'], self.date['end_month'])
-            print(category_name + " Urls are generated")
+            for year in range(self.date['start_year'], self.date['end_year']+1):
+                for month in range(self.date['start_month'], self.date['end_month']+1):
+                    day_urls = self.make_news_page_url(url, year, year, month, month)
+                    print('    url for {}/{:02d} is gathered!'.format(year, month))
+                    self.crawling(category_name, day_urls[str(year)]['{:02d}'.format(month)], year, month)
 
-            for key_year in day_urls.keys():
-                for key_month in day_urls[key_year].keys():
-                    self.crawling(category_name, day_urls[key_year][key_month], key_year, key_month)
-                    # proc = Process(target=self.crawling,
-                    #                args=(category_name, day_urls[key_year][key_month], key_year, key_month))
-                    # proc.start()
+            # for year in range(self.date['start_year'], self.date['end_year']+1):
+            #     proc_pool = []
+            #     for month in range(self.date['start_month'], self.date['end_month']+1):
+            #         day_urls = self.make_news_page_url(url, year, year, month, month)
+            #         print('    url for {}/{} is gathered!'.format(year, month))
+            #
+            #         # self.crawling(category_name, day_urls[str(year)]['{:02d}'.format(month)], year, month)
+            #         proc = Process(target=self.crawling,
+            #                        args=(category_name, day_urls[str(year)]['{:02d}'.format(month)], year, month))
+            #         proc_pool.append(proc)
+            #
+            #     for i in range(len(proc_pool)):
+            #         proc_pool[i].start()
+            #
+            #     for i in range(len(proc_pool)):
+            #         proc_pool[i].join()
+
+            # day_urls = self.make_news_page_url(url, self.date['start_year'], self.date['end_year'],
+            #                                         self.date['start_month'], self.date['end_month'])
+            # print(category_name + " Urls are generated")
+            #
+            # for key_year in day_urls.keys():
+            #     for key_month in day_urls[key_year].keys():
+            #         self.crawling(category_name, day_urls[key_year][key_month], key_year, key_month)
 
 
 if __name__ == "__main__":
     Crawler = ArticleCrawler(num_of_pool=20)
-    Crawler.set_category(['정치', '경제', '사회', '생활문화', '세계'])
-    Crawler.set_filtering_string([['아동', '만족도'], ['아동', '행복'],
-                                  ['청소년', '만족도'], ['청소년', '행복']])
+    Crawler.set_category(['사회', '생활문화', '세계', '정치', '경제'])
+    # Crawler.set_filtering_string([['아동', '만족도'], ['아동', '행복'],
+    #                               ['청소년', '만족도'], ['청소년', '행복']])
+    Crawler.set_filtering_string([['아동']])
     Crawler.set_date_range(2015, 1, 2019, 12)
     Crawler.start()
