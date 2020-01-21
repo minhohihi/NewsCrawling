@@ -18,7 +18,7 @@ news_detail = mgr.list()
 
 
 class ArticleCrawler(object):
-    def __init__(self):
+    def __init__(self, num_of_pool=20):
         self.categories = {'정치': 100, '경제': 101, '사회': 102, '생활문화': 103, '세계': 104, 'IT과학': 105, '오피니언': 110,
                            'politics': 100, 'economy': 101, 'society': 102, 'living_culture': 103, 'world': 104, 'IT_science': 105, 'opinion': 110}
         self.selected_categories = []
@@ -26,6 +26,7 @@ class ArticleCrawler(object):
         self.user_operating_system = str(platform.system())
         self.filtering_strlist = []
         self.target_url_list = []
+        self.num_of_pool = num_of_pool
 
     def set_category(self, *args):
         for key in args:
@@ -127,7 +128,7 @@ class ArticleCrawler(object):
 
         for content_url in post:  # 기사 URL
             # 크롤링 대기 시간
-            sleep(0.01)
+            sleep(1.0)
 
             # 기사 HTML 가져옴
             request_content = self.get_url_data(content_url)
@@ -145,9 +146,6 @@ class ArticleCrawler(object):
                 if not text_headline:  # 공백일 경우 기사 제외 처리
                     continue
 
-                if not any(filter_str in text_headline for filter_str in self.filtering_strlist):
-                    continue
-
                 # 기사 본문 가져옴
                 tag_content = document_content.find_all('div', {'id': 'articleBodyContents'})
                 text_sentence = ''  # 뉴스 기사 본문 초기화
@@ -160,6 +158,9 @@ class ArticleCrawler(object):
                 text_company = ''  # 언론사 초기화
                 text_company = text_company + str(tag_company[0].get('content'))
                 if not text_company:  # 공백일 경우 기사 제외 처리
+                    continue
+
+                if not self.is_context_contain_strs(text_sentence, self.filtering_strlist):
                     continue
 
                 news_detail.append([news_date, data[1], text_company, text_headline, text_sentence, content_url])
@@ -175,6 +176,14 @@ class ArticleCrawler(object):
                 # wcsv.writerow([ex, content_url])
                 del request_content, document_content
                 pass
+
+    @staticmethod
+    def is_context_contain_strs(context, filter_str_list):
+        for i in range(len(filter_str_list)):
+            if all(filter_str in context for filter_str in filter_str_list[i]):
+                return True
+        return False
+
 
     def crawling(self, category_name, target_url_list, key_year, key_month):
         global news_detail
@@ -192,7 +201,7 @@ class ArticleCrawler(object):
         self.target_url_list = target_url_list
 
         print('    Start crawling news[{:05d}] of {}/{}'.format(len(self.target_url_list), key_year, key_month))
-        pool = Pool(processes=10)
+        pool = Pool(processes=self.num_of_pool)
         pool.map(self.crawling_core, zip(range(0, len(self.target_url_list), 1), [category_name]*len(self.target_url_list)))
 
         # CSV 작성
@@ -221,8 +230,9 @@ class ArticleCrawler(object):
 
 
 if __name__ == "__main__":
-    Crawler = ArticleCrawler()
-    Crawler.set_category("사회")
-    Crawler.set_filtering_string(["아동"])
-    Crawler.set_date_range(2017, 12, 2017, 12)
+    Crawler = ArticleCrawler(num_of_pool=20)
+    Crawler.set_category(['정치', '경제', '사회', '생활문화', '세계'])
+    Crawler.set_filtering_string([['아동', '만족도'], ['아동', '행복'],
+                                  ['청소년', '만족도'], ['청소년', '행복']])
+    Crawler.set_date_range(2015, 1, 2019, 12)
     Crawler.start()
