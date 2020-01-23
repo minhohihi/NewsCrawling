@@ -12,10 +12,21 @@ import platform
 import calendar
 import requests
 import re
+import argparse
+
 
 mgr = Manager()
 news_detail = mgr.list()
 
+argparser = argparse.ArgumentParser(description='')
+
+argparser.add_argument('--start_year', type=int, required=True, help='Start year')
+argparser.add_argument('--end_year', type=int, required=True, help='End year')
+argparser.add_argument('--start_month', type=int, required=True, help='Start month')
+argparser.add_argument('--end_month', type=int, required=True, help='End month')
+argparser.add_argument('--num_pools', type=int, required=True, help='Number of Pool')
+
+args = argparser.parse_args()
 
 class ArticleCrawler(object):
     def __init__(self, num_of_pool=20):
@@ -102,6 +113,13 @@ class ArticleCrawler(object):
             remaining_tries = remaining_tries - 1
         raise ResponseTimeout()
 
+    @staticmethod
+    def is_context_contain_strs(context, filter_str_list):
+        for i in range(len(filter_str_list)):
+            if all(filter_str in context for filter_str in filter_str_list[i]):
+                return True
+        return False
+
     def crawling_core(self, data):
         global news_detail
 
@@ -126,15 +144,16 @@ class ArticleCrawler(object):
             post.append(line.a.get('href'))  # 해당되는 page에서 모든 기사들의 URL을 post 리스트에 넣음
         del post_temp
 
-        for content_url in post:  # 기사 URL
+        for i, content_url in enumerate(post):  # 기사 URL
             # 크롤링 대기 시간
-            sleep(1.0)
+            sleep(0.02)
 
             # 기사 HTML 가져옴
             request_content = self.get_url_data(content_url)
             try:
                 document_content = BeautifulSoup(request_content.content, 'html.parser')
             except:
+                del request_content, document_content
                 continue
 
             try:
@@ -144,6 +163,8 @@ class ArticleCrawler(object):
                 text_headline = text_headline + ArticleParser.clear_headline(
                     str(tag_headline[0].find_all(text=True)))
                 if not text_headline:  # 공백일 경우 기사 제외 처리
+                    del tag_headline, text_headline
+                    del request_content, document_content
                     continue
 
                 # 기사 본문 가져옴
@@ -151,25 +172,31 @@ class ArticleCrawler(object):
                 text_sentence = ''  # 뉴스 기사 본문 초기화
                 text_sentence = text_sentence + ArticleParser.clear_content(str(tag_content[0].find_all(text=True)))
                 if not text_sentence:  # 공백일 경우 기사 제외 처리
+                    del tag_headline, text_headline
+                    del tag_content, text_sentence
+                    del request_content, document_content
                     continue
 
                 # 기사 언론사 가져옴
                 tag_company = document_content.find_all('meta', {'property': 'me2:category1'})
                 text_company = ''  # 언론사 초기화
                 text_company = text_company + str(tag_company[0].get('content'))
-                if not text_company:  # 공백일 경우 기사 제외 처리
-                    continue
 
                 if not self.is_context_contain_strs(text_sentence, self.filtering_strlist):
+                    del tag_headline, text_headline
+                    del tag_content, text_sentence
+                    del tag_company, text_company
+                    del request_content, document_content
                     continue
 
                 news_detail.append([news_date, data[1], text_company, text_headline, text_sentence, content_url])
 
-                print('        news_#{:04d}_{:05d}: {} - {} / {}'.format(len(news_detail), data[0], data[1], news_date, text_headline))
+                print('    news_#{:04d}_{:05d}_{:04d}: {} - {} / {}'.
+                        format(len(news_detail), data[0], i, data[1], news_date, text_headline))
 
-                del text_company, text_sentence, text_headline
-                del tag_company
-                del tag_content, tag_headline
+                del tag_headline, text_headline
+                del tag_content, text_sentence
+                del tag_company, text_company
                 del request_content, document_content
 
             except Exception as ex:  # UnicodeEncodeError ..
@@ -177,12 +204,7 @@ class ArticleCrawler(object):
                 del request_content, document_content
                 pass
 
-    @staticmethod
-    def is_context_contain_strs(context, filter_str_list):
-        for i in range(len(filter_str_list)):
-            if all(filter_str in context for filter_str in filter_str_list[i]):
-                return True
-        return False
+        del post
 
     def crawling(self, category_name, target_url_list, year, month):
         global news_detail
@@ -199,7 +221,7 @@ class ArticleCrawler(object):
         news_detail.append(['Date', 'Category', 'NewsComp', 'Title', 'Content', 'URL'])
         self.target_url_list = target_url_list
 
-        print('    Start crawling news[{:05d}] of {}/{}'.format(len(self.target_url_list), year, month))
+        print('    Start crawling news_{:05d} of {}/{:02d}'.format(len(self.target_url_list), year, month))
         pool = Pool(processes=self.num_of_pool)
         pool.map(self.crawling_core, zip(range(0, len(self.target_url_list), 1), [category_name]*len(self.target_url_list)))
 
@@ -210,17 +232,36 @@ class ArticleCrawler(object):
 
         writer.close()
 
+        del writer
+        del pool
+        del news_detail
+        del self.target_url_list
+        news_detail = mgr.list()
+
     def start(self):
         # MultiProcess 크롤링 시작
         for category_name in self.selected_categories:
             # 기사 URL 형식
             url = "http://news.naver.com/main/list.nhn?mode=LSD&mid=sec&sid1=" + str(self.categories.get(category_name)) + "&date="
 
-            for year in range(self.date['start_year'], self.date['end_year']+1):
-                for month in range(self.date['start_month'], self.date['end_month']+1):
-                    day_urls = self.make_news_page_url(url, year, year, month, month)
-                    print('    url for {}/{:02d} is gathered!'.format(year, month))
-                    self.crawling(category_name, day_urls[str(year)]['{:02d}'.format(month)], year, month)
+            start_year = self.date['start_year']
+            end_year = self.date['end_year']
+            for curr_year in range(self.date['start_year'], self.date['end_year']+1):
+                if curr_year == start_year:
+                    year_startmonth = self.date['start_month']
+                    year_endmonth = 13
+                elif curr_year == end_year:
+                    year_startmonth = 1
+                    year_endmonth = self.date['end_month'] + 1
+                else:
+                    year_startmonth = 1
+                    year_endmonth = 13
+
+                for curr_month in range(year_startmonth, year_endmonth):
+                    day_urls = self.make_news_page_url(url, curr_year, curr_year, curr_month, curr_month)
+                    print('    url for {}/{:02d} is gathered!'.format(curr_year, curr_month))
+                    self.crawling(category_name, day_urls[str(curr_year)]['{:02d}'.format(curr_month)], curr_year, curr_month)
+                    del day_urls
 
             # for year in range(self.date['start_year'], self.date['end_year']+1):
             #     proc_pool = []
@@ -249,10 +290,9 @@ class ArticleCrawler(object):
 
 
 if __name__ == "__main__":
-    Crawler = ArticleCrawler(num_of_pool=20)
+    Crawler = ArticleCrawler(num_of_pool=args.num_pools)
     Crawler.set_category(['사회', '생활문화', '세계', '정치', '경제'])
-    # Crawler.set_filtering_string([['아동', '만족도'], ['아동', '행복'],
-    #                               ['청소년', '만족도'], ['청소년', '행복']])
-    Crawler.set_filtering_string([['아동']])
-    Crawler.set_date_range(2015, 1, 2019, 12)
+    Crawler.set_filtering_string([['아동', '만족도'], ['아동', '행복'],
+                                  ['청소년', '만족도'], ['청소년', '행복']])
+    Crawler.set_date_range(args.start_year, args.start_month, args.end_year, args.end_month)
     Crawler.start()
